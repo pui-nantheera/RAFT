@@ -23,7 +23,7 @@ def load_image(imfile):
     return img[None].to(DEVICE)
 
 
-def viz(img, flo):
+def viz(savename, img, flo):
     img = img[0].permute(1,2,0).cpu().numpy()
     flo = flo[0].permute(1,2,0).cpu().numpy()
     
@@ -34,9 +34,10 @@ def viz(img, flo):
     # import matplotlib.pyplot as plt
     # plt.imshow(img_flo / 255.0)
     # plt.show()
-
-    cv2.imshow('image', img_flo[:, :, [2,1,0]]/255.0)
-    cv2.waitKey()
+    # cv2.imshow('image', img_flo[:, :, [2,1,0]]/255.0)
+    imgout = np.array(img_flo[:, :, [2,1,0]], dtype='uint8')
+    cv2.imwrite(savename , imgout)
+    # cv2.waitKey()
 
 
 def demo(args):
@@ -60,16 +61,20 @@ def demo(args):
             image1, image2 = padder.pad(image1, image2)
 
             flow_low, flow_up = model(image1, image2, iters=20, test_mode=True)
-            viz(image1, flow_up)
+            subname = imfile1.split("/")
+            savename = os.path.join(args.result, subname[-1])
+            viz(savename, image1, flow_up)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', help="restore checkpoint")
     parser.add_argument('--path', help="dataset for evaluation")
+    parser.add_argument('--result', help="save result")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')
     args = parser.parse_args()
 
     demo(args)
+
