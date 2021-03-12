@@ -26,11 +26,9 @@ def load_image(imfile):
 def viz(savename, img, flo):
     img = img[0].permute(1,2,0).cpu().numpy()
     flo = flo[0].permute(1,2,0).cpu().numpy()
-    
     # map flow to rgb image
     flo = flow_viz.flow_to_image(flo)
     img_flo = np.concatenate([img, flo], axis=0)
-
     # import matplotlib.pyplot as plt
     # plt.imshow(img_flo / 255.0)
     # plt.show()
@@ -39,10 +37,42 @@ def viz(savename, img, flo):
     cv2.imwrite(savename , imgout)
     # cv2.waitKey()
 
+def vizproject(savename, img1, img2, flo):
+    img1 = img1[0].permute(1,2,0).cpu().numpy()
+    img2 = img2[0].permute(1,2,0).cpu().numpy()
+    flo = flo[0].permute(1,2,0).cpu().numpy()
+    u = flo[:,:,0]
+    v = flo[:,:,1]
+    refimg = img1
+    curimg = img2
+    imgproj = np.zeros(img1.shape)
+    reverseflowu = np.zeros(u.shape)
+    reverseflowv = np.zeros(v.shape)
+    for i in range(img1.shape[0]):
+        for j in range(img1.shape[1]):
+            ii = int(i + u[i,j])
+            jj = int(j + v[i,j])
+            if (ii>=0) and (jj>=0) and (ii<img1.shape[0]) and (jj<img1.shape[1]):
+                if (u[i,j]**2 + v[i,j]**2) > (reverseflowu[i,j]**2 + reverseflowv[i,j]**2):
+                    imgproj[i,j,:] = curimg[ii,jj,:]
+                    reverseflowu[i,j] = u[i,j]
+                    reverseflowv[i,j] = v[i,j]
+    # map flow to rgb image
+    errormap = refimg  - imgproj + 128
+    flo = flow_viz.flow_to_image(flo)
+    img_flo1 = np.concatenate([refimg, imgproj], axis=0)
+    img_flo2 = np.concatenate([errormap, 0.5*(refimg +flo)], axis=0)
+    img_flo = np.concatenate([img_flo1, img_flo2], axis=1)
+    # import matplotlib.pyplot as plt
+    # plt.imshow(img_flo / 255.0)
+    # plt.show()
+    # cv2.imshow('image', img_flo[:, :, [2,1,0]]/255.0)
+    imgout = np.array(img_flo[:, :, [2,1,0]], dtype='uint8')
+    cv2.imwrite(savename , imgout)    # cv2.waitKey()
 
 def demo(args):
     model = torch.nn.DataParallel(RAFT(args))
-    model.load_state_dict(torch.load(args.model))
+    model.load_state_dict(torch.load(args.model)) # , map_location=torch.device('cpu')))
 
     model = model.module
     model.to(DEVICE)
@@ -63,7 +93,7 @@ def demo(args):
             flow_low, flow_up = model(image1, image2, iters=20, test_mode=True)
             subname = imfile1.split("/")
             savename = os.path.join(args.result, subname[-1])
-            viz(savename, image1, flow_up)
+            vizproject(savename, image1, image2, flow_up)
 
 
 if __name__ == '__main__':
@@ -77,4 +107,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     demo(args)
+
+
+
+
 
