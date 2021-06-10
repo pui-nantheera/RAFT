@@ -12,8 +12,8 @@ from PIL import Image
 from raft import RAFT
 from utils import flow_viz
 from utils.utils import InputPadder
-
-
+from torch.autograd import Variable
+import torch.nn as nn
 
 DEVICE = 'cuda'
 
@@ -37,10 +37,8 @@ def viz(savename, img, flo):
     cv2.imwrite(savename , imgout)
     # cv2.waitKey()
 
+
 def vizproject(savename, img1, img2, flo):
-    img1 = img1[0].permute(1,2,0).cpu().numpy()
-    img2 = img2[0].permute(1,2,0).cpu().numpy()
-    flo = flo[0].permute(1,2,0).cpu().numpy()
     u = flo[:,:,0]
     v = flo[:,:,1]
     refimg = img1
@@ -60,8 +58,12 @@ def vizproject(savename, img1, img2, flo):
     # map flow to rgb image
     errormap = refimg  - imgproj + 128
     flo = flow_viz.flow_to_image(flo)
-    img_flo1 = np.concatenate([refimg, imgproj], axis=0)
-    img_flo2 = np.concatenate([errormap, 0.5*(refimg +flo)], axis=0)
+    uimage = np.repeat(u[:,:,np.newaxis]*10, 3, axis=2)
+    vimage = np.repeat(v[:,:,np.newaxis]*10, 3, axis=2)
+    # img_flo1 = np.concatenate([refimg, 0.5*(refimg + imgproj)], axis=0)
+    # img_flo2 = np.concatenate([curimg, 0.5*(refimg +curimg)], axis=0)
+    img_flo1 = np.concatenate([refimg, uimage], axis=0)
+    img_flo2 = np.concatenate([curimg, vimage], axis=0)
     img_flo = np.concatenate([img_flo1, img_flo2], axis=1)
     # import matplotlib.pyplot as plt
     # plt.imshow(img_flo / 255.0)
@@ -77,7 +79,7 @@ def demo(args):
     model = model.module
     model.to(DEVICE)
     model.eval()
-
+    
     with torch.no_grad():
         images = glob.glob(os.path.join(args.path, '*.png')) + \
                  glob.glob(os.path.join(args.path, '*.jpg'))
@@ -91,24 +93,24 @@ def demo(args):
             image1, image2 = padder.pad(image1, image2)
 
             flow_low, flow_up = model(image1, image2, iters=20, test_mode=True)
+            flow = padder.unpad(flow_up[0]).permute(1, 2, 0).cpu().numpy()
+            image1 = padder.unpad(image1[0]).permute(1, 2, 0).cpu().numpy()
+            image2 = padder.unpad(image2[0]).permute(1, 2, 0).cpu().numpy()
             subname = imfile1.split("/")
             savename = os.path.join(args.result, subname[-1])
-            vizproject(savename, image1, image2, flow_up)
+            vizproject(savename, image1, image2, flow)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', help="restore checkpoint")
-    parser.add_argument('--path', help="dataset for evaluation")
-    parser.add_argument('--result', help="save result")
+    parser.add_argument('--model', default='models/raft-sintel.pth', help="restore checkpoint")
+    parser.add_argument('--path', default='demo-frames', help="dataset for evaluation")
+    parser.add_argument('--result', default='/work/eexna/Creative/raft_results_cur1p', help="save result")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')
     args = parser.parse_args()
 
     demo(args)
-
-
-
 
 
