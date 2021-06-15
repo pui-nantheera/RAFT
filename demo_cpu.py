@@ -14,13 +14,13 @@ from utils import flow_viz
 from utils.utils import InputPadder
 from torch.autograd import Variable
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', default='models/raft-sintel.pth', help="restore checkpoint")
 parser.add_argument('--path', default='/work/eexna/Creative/results/ESPRITlandscape', help="dataset for evaluation")
-parser.add_argument('--result', default='/work/eexna/Creative/raft_results_cur1p', help="save result")
+parser.add_argument('--result', default='/work/eexna/Creative/results/ESPRITlandscape_RAFT', help="save result")
 parser.add_argument('--small', action='store_true', help='use small model')
 parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
 parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')
@@ -34,13 +34,15 @@ else:
 
 print('using ' + DEVICE)
 
-def load_image(imfile):
+def load_image(imfile, scaling=1):
     im = Image.open(imfile)
-    (width, height) = (im.width // 4, im.height // 4)
+    im_orig = np.array(im).astype(np.uint8)
+    img_orig = torch.from_numpy(im_orig).permute(2, 0, 1).float()
+    (width, height) = (im.width // scaling, im.height // scaling)
     print(str(width) + 'x' + str(height))
     img = np.array(im.resize((width, height))).astype(np.uint8)
     img = torch.from_numpy(img).permute(2, 0, 1).float()
-    return img[None].to(DEVICE)
+    return img[None].to(DEVICE), img_orig[None].to(DEVICE)
 
 def warp(x, flo):
         """
@@ -82,24 +84,31 @@ with torch.no_grad():
         images = glob.glob(os.path.join(args.path, '*.png')) + \
                  glob.glob(os.path.join(args.path, '*.jpg'))
         images = sorted(images)
-        for imfile1, imfile2 in zip(images[:-1], images[1:]):
-            image1 = load_image(imfile1)
-            image2 = load_image(imfile2)
+        for imfile1, imfile2 in zip(images[100:101], images[101:102]):#zip(images[:-1], images[1:]):
+            print(imfile1 + ' ' + imfile2)
+            for scaling in range(3,7,1)
+            image1, img_orig1 = load_image(imfile1,scaling=scaling)
+            image2, img_orig2 = load_image(imfile2,scaling=scaling)
             padder = InputPadder(image1.shape)
             image1, image2 = padder.pad(image1, image2)
             flow_low, flow_up = model(image1, image2, iters=20, test_mode=True)
-            warpimg1 = warp(image2,flow_up)
-            wrapimg2 = warp(image1,flow_up)
-            image1 = padder.unpad(image1[0]).permute(1, 2, 0).cpu().numpy()
-            image2 = padder.unpad(image2[0]).permute(1, 2, 0).cpu().numpy()
+            B,C,W,H = img_orig1.shape
+            flow_up  = F.interpolate(flow_up,(W,H),mode='bicubic')
+            warpimg1 = warp(img_orig2,flow_up)
+            #wrapimg2 = warp(image1,flow_up)
+            image1 = padder.unpad(img_orig1[0]).permute(1, 2, 0).cpu().numpy()
+            #image2 = padder.unpad(image2[0]).permute(1, 2, 0).cpu().numpy()
             warpimg1 = padder.unpad(warpimg1[0]).permute(1, 2, 0).cpu().numpy()
-            wrapimg2 = padder.unpad(wrapimg2[0]).permute(1, 2, 0).cpu().numpy()
+            #wrapimg2 = padder.unpad(wrapimg2[0]).permute(1, 2, 0).cpu().numpy()
             # save result
             subname = imfile1.split("/")
             savename = os.path.join(args.result, subname[-1])
-            img_flo1 = np.concatenate([image1, np.abs(image1 - warpimg1)], axis=0)
-            img_flo2 = np.concatenate([image2, np.abs(image2 - wrapimg2)], axis=0)
-            img_flo = np.concatenate([img_flo1, img_flo2], axis=1)
+            diffimg = np.abs(image1 - warpimg1)
+            print(str(scaling) + ': ' + str(np.mean(diffimg)))
+            img_flo = diffimg
+            #img_flo1 = np.concatenate([image1, np.abs(image1 - warpimg1)], axis=0)
+            #img_flo2 = np.concatenate([image2, np.abs(image2 - wrapimg2)], axis=0)
+            #img_flo = np.concatenate([img_flo1, img_flo2], axis=1)
             imgout = np.array(img_flo[:, :, [2,1,0]], dtype='uint8')
             cv2.imwrite(savename , imgout)
 

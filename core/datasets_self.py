@@ -12,7 +12,7 @@ from glob import glob
 import os.path as osp
 
 from utils import frame_utils
-from utils.augmentor import FlowAugmentor, SparseFlowAugmentor
+from utils.augmentor_self import FlowAugmentor, SparseFlowAugmentor
 
 
 class FlowDataset(data.Dataset):
@@ -27,7 +27,6 @@ class FlowDataset(data.Dataset):
 
         self.is_test = False
         self.init_seed = False
-        self.flow_list = []
         self.image_list = []
         self.extra_info = []
 
@@ -36,6 +35,11 @@ class FlowDataset(data.Dataset):
         if self.is_test:
             img1 = frame_utils.read_gen(self.image_list[index][0])
             img2 = frame_utils.read_gen(self.image_list[index][1])
+            # resize image
+            scaledown = 8 # for 8K down to 6:1280x720, 8:960x540
+            (width, height) = (img1.width // scaledown, img1.height // scaledown)
+            img1 = img1.resize((width, height))
+            img2 = img2.resize((width, height))
             img1 = np.array(img1).astype(np.uint8)[..., :3]
             img2 = np.array(img2).astype(np.uint8)[..., :3]
             img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
@@ -51,16 +55,14 @@ class FlowDataset(data.Dataset):
                 self.init_seed = True
 
         index = index % len(self.image_list)
-        valid = None
-        if self.sparse:
-            flow, valid = frame_utils.readFlowKITTI(self.flow_list[index])
-        else:
-            flow = frame_utils.read_gen(self.flow_list[index])
 
         img1 = frame_utils.read_gen(self.image_list[index][0])
         img2 = frame_utils.read_gen(self.image_list[index][1])
-
-        flow = np.array(flow).astype(np.float32)
+        # resize image
+        scaledown = 8 # for 8K down to 6:1280x720, 8:960x540
+        (width, height) = (img1.width // scaledown, img1.height // scaledown)
+        img1 = img1.resize((width, height))
+        img2 = img2.resize((width, height))
         img1 = np.array(img1).astype(np.uint8)
         img2 = np.array(img2).astype(np.uint8)
 
@@ -74,20 +76,14 @@ class FlowDataset(data.Dataset):
 
         if self.augmentor is not None:
             if self.sparse:
-                img1, img2, flow, valid = self.augmentor(img1, img2, flow, valid)
+                img1, img2, valid = self.augmentor(img1, img2, valid)
             else:
-                img1, img2, flow = self.augmentor(img1, img2, flow)
+                img1, img2 = self.augmentor(img1, img2)
 
         img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
         img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
-        flow = torch.from_numpy(flow).permute(2, 0, 1).float()
 
-        if valid is not None:
-            valid = torch.from_numpy(valid)
-        else:
-            valid = (flow[0].abs() < 1000) & (flow[1].abs() < 1000)
-
-        return img1, img2, flow, valid.float()
+        return img1, img2
 
 
     def __rmul__(self, v):
@@ -193,15 +189,10 @@ class HD1K(FlowDataset):
 
 class ESPRIT(FlowDataset):
     def __init__(self, aug_params=None, root='/work/eexna/Creative/results/ESPRITlandscape'):
-        super(ESPRIT, self).__init__(aug_params, sparse=True)
-        seq_ix = 0
-        while 1:
-            images = sorted(glob(os.path.join(root, '/%06d*.png' % seq_ix)))
-            if len(images) == 0:
-                break
-            for i in range(len(images)-1):
-                self.image_list += [ [images[i], images[i+1]] ]
-            seq_ix += 1
+        super(ESPRIT, self).__init__(aug_params, sparse=False)
+        images = sorted(glob(root + '/*.png'))
+        for i in range(len(images)-1):
+            self.image_list += [ [images[i], images[i+1]] ]
 
 
 def fetch_dataloader(args, TRAIN_DS='C+T+K+S+H'):

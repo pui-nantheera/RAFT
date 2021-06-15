@@ -10,14 +10,42 @@ import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
-import datasets
+import datasets_self
 from utils import flow_viz
 from utils import frame_utils
 
 from raft import RAFT
 from utils.utils import InputPadder, forward_interpolate
 
-
+def warp(x, flo):
+        """
+        warp an image/tensor (im2) back to im1, according to the optical flow
+        x: [B, C, H, W] (im2)
+        flo: [B, 2, H, W] flow
+        """
+        B, C, H, W = x.size()
+        # mesh grid 
+        xx = torch.arange(0, W).view(1,-1).repeat(H,1)
+        yy = torch.arange(0, H).view(-1,1).repeat(1,W)
+        xx = xx.view(1,1,H,W).repeat(B,1,1,1)
+        yy = yy.view(1,1,H,W).repeat(B,1,1,1)
+        grid = torch.cat((xx,yy),1).float()
+        if x.is_cuda:
+            grid = grid.cuda()
+        vgrid = Variable(grid) + flo
+        # scale grid to [-1,1] 
+        vgrid[:,0,:,:] = 2.0*vgrid[:,0,:,:].clone() / max(W-1,1)-1.0
+        vgrid[:,1,:,:] = 2.0*vgrid[:,1,:,:].clone() / max(H-1,1)-1.0
+        vgrid = vgrid.permute(0,2,3,1)        
+        output = nn.functional.grid_sample(x, vgrid)
+        mask = torch.autograd.Variable(torch.ones(x.size()))#.cuda()
+        if x.is_cuda:
+            mask = mask.cuda()
+        mask = nn.functional.grid_sample(mask, vgrid)
+        mask[mask<0.9999] = 0
+        mask[mask>0] = 1
+        return output*mask
+        
 @torch.no_grad()
 def create_sintel_submission(model, iters=32, warm_start=False, output_path='sintel_submission'):
     """ Create submission for the Sintel leaderboard """
@@ -49,6 +77,36 @@ def create_sintel_submission(model, iters=32, warm_start=False, output_path='sin
             frame_utils.writeFlow(output_file, flow)
             sequence_prev = sequence
 
+@torch.no_grad()
+def create_ESPRIT_submission(model, iters=20, warm_start=False, output_path='ESPRIT_submission'):
+    """ Create submission for the Sintel leaderboard """
+    model.eval()
+    for dstype in ['clean', 'final']:
+        test_dataset = datasets.ESPRIT(split='test', aug_params=None, dstype=dstype)
+        
+        flow_prev, sequence_prev = None, None
+        for test_id in range(len(test_dataset)):
+            image1, image2, (sequence, frame) = test_dataset[test_id]
+            if sequence != sequence_prev:
+                flow_prev = None
+            
+            padder = InputPadder(image1.shape)
+            image1, image2 = padder.pad(image1[None].cuda(), image2[None].cuda())
+
+            flow_low, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+            flow = padder.unpad(flow_pr[0]).permute(1, 2, 0).cpu().numpy()
+
+            if warm_start:
+                flow_prev = forward_interpolate(flow_low[0])[None].cuda()
+            
+            output_dir = os.path.join(output_path, dstype, sequence)
+            output_file = os.path.join(output_dir, 'frame%04d.flo' % (frame+1))
+
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+
+            frame_utils.writeFlow(output_file, flow)
+            sequence_prev = sequence
 
 @torch.no_grad()
 def create_kitti_submission(model, iters=24, output_path='kitti_submission'):
