@@ -42,7 +42,7 @@ except:
 # exclude extremly large displacements
 MAX_FLOW = 400
 SUM_FREQ = 100
-VAL_FREQ = 10 #5000
+VAL_FREQ = 500
 
 def warp(x, flo):
         """
@@ -85,7 +85,7 @@ def sequence_loss(image1, image2, flow_preds, gamma=0.8, max_flow=MAX_FLOW):
         warpimg = warp(image2,flow_preds[i])
         i_loss = (warpimg - image1).abs()
         flow_loss += i_weight * i_loss.mean()
-
+    
     return flow_loss
 
 
@@ -180,7 +180,6 @@ def train(args):
         for i_batch, data_blob in enumerate(train_loader):
             optimizer.zero_grad()
             image1, image2 = [x.cuda() for x in data_blob]
-            print('processing step '+ str(total_steps))
 
             if args.add_noise:
                 stdv = np.random.uniform(0.0, 5.0)
@@ -199,8 +198,9 @@ def train(args):
             scaler.update()
 
             #logger.push(metrics)
-
+            print('processing step '+ str(total_steps) + ', loss ' + str(loss.item()))
             if total_steps % VAL_FREQ == 0:
+                print('i=' + str(total_steps) + ' loss=' + str(loss))
                 PATH = args.save_ckpt + '/%d_%s.pth' % (total_steps+1, args.name)
                 print(PATH)
                 torch.save(model.state_dict(), PATH)
