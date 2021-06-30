@@ -45,7 +45,7 @@ def warp(x, flo):
         mask[mask<0.9999] = 0
         mask[mask>0] = 1
         return output*mask
-        
+
 @torch.no_grad()
 def create_sintel_submission(model, iters=32, warm_start=False, output_path='sintel_submission'):
     """ Create submission for the Sintel leaderboard """
@@ -94,6 +94,8 @@ def create_ESPRIT_submission(model, iters=20, warm_start=False, output_path='ESP
             image1, image2 = padder.pad(image1[None].cuda(), image2[None].cuda())
 
             flow_low, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+            warpimg1 = warp(image2,flow_pr)
+            
             flow = padder.unpad(flow_pr[0]).permute(1, 2, 0).cpu().numpy()
 
             if warm_start:

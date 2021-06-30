@@ -12,7 +12,7 @@ from glob import glob
 import os.path as osp
 
 from utils import frame_utils
-from utils.augmentor_self import FlowAugmentor, SparseFlowAugmentor
+from utils.augmentor_self import FlowAugmentor #, SparseFlowAugmentor
 
 
 class FlowDataset(data.Dataset):
@@ -37,7 +37,9 @@ class FlowDataset(data.Dataset):
             img2 = frame_utils.read_gen(self.image_list[index][1])
             # resize image
             scaledown = 8 # for 8K down to 6:1280x720, 8:960x540
-            (width, height) = (img1.width // scaledown, img1.height // scaledown)
+            #(width, height) = (img1.width // scaledown, img1.height // scaledown)
+            width = 960
+            height = 528
             img1 = img1.resize((width, height))
             img2 = img2.resize((width, height))
             img1 = np.array(img1).astype(np.uint8)[..., :3]
@@ -60,30 +62,48 @@ class FlowDataset(data.Dataset):
         img2 = frame_utils.read_gen(self.image_list[index][1])
         # resize image
         scaledown = 8 # for 8K down to 6:1280x720, 8:960x540
-        (width, height) = (img1.width // scaledown, img1.height // scaledown)
+        img1_orig = img1
+        img2_orig = img2
+        #(width, height) = (img1.width // scaledown, img1.height // scaledown)
+        width = 960
+        height = 528
         img1 = img1.resize((width, height))
         img2 = img2.resize((width, height))
+        #(width, height) = (img1_orig.width // 2, img1_orig.height // 2)
+        width = 960 #1920
+        height = 528#1056
+        img1_orig = img1_orig.resize((width, height))
+        img2_orig = img2_orig.resize((width, height))
+        img1_orig = np.array(img1_orig).astype(np.uint8)
+        img2_orig = np.array(img2_orig).astype(np.uint8)
         img1 = np.array(img1).astype(np.uint8)
         img2 = np.array(img2).astype(np.uint8)
+        #print('img1.shape ' + str(img1.shape))
 
         # grayscale images
         if len(img1.shape) == 2:
             img1 = np.tile(img1[...,None], (1, 1, 3))
             img2 = np.tile(img2[...,None], (1, 1, 3))
+            img1_orig = np.tile(img1_orig[...,None], (1, 1, 3))
+            img2_orig = np.tile(img2_orig[...,None], (1, 1, 3))
         else:
             img1 = img1[..., :3]
             img2 = img2[..., :3]
+            img1_orig = img1_orig[..., :3]
+            img2_orig = img2_orig[..., :3]
 
-        if self.augmentor is not None:
-            if self.sparse:
-                img1, img2, valid = self.augmentor(img1, img2, valid)
-            else:
-                img1, img2 = self.augmentor(img1, img2)
+        #if self.augmentor is not None:
+        #    if self.sparse:
+        #        img1, img2, valid = self.augmentor(img1, img2, valid)
+        #    else:
+        #        img1, img2 = self.augmentor(img1, img2)
 
         img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
         img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
+        img1_orig = torch.from_numpy(img1_orig).permute(2, 0, 1).float()
+        img2_orig = torch.from_numpy(img2_orig).permute(2, 0, 1).float()
 
-        return img1, img2
+        return img1, img2, img1_orig, img2_orig
 
 
     def __rmul__(self, v):
@@ -209,8 +229,8 @@ def fetch_dataloader(args, TRAIN_DS='C+T+K+S+H'):
         train_dataset = clean_dataset + final_dataset
 
     elif args.stage == 'ESPRIT':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.6, 'max_scale': 0.6, 'do_flip': False}
-        train_dataset = ESPRIT(aug_params)
+        aug_params = {'crop_size': args.image_size, 'min_scale': args.minscale, 'max_scale': args.maxscale, 'do_flip': args.flip}
+        train_dataset = ESPRIT(aug_params, root=args.data_dir)
 
     elif args.stage == 'sintel':
         aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True}

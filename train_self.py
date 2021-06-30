@@ -51,6 +51,14 @@ def warp(x, flo):
         flo: [B, 2, H, W] flow
         """
         B, C, H, W = x.size()
+        Bf,Cf,Hf,Wf = flo.shape
+        #print('flo.shape='+str(Hf)+','+str(Wf))
+        #print('x.shape='+str(H)+','+str(W))
+        flo  = F.interpolate(flo,(H,W),mode='bicubic')
+        flo[:,0,:,:] = flo[:,0,:,:]*W/Wf
+        flo[:,1,:,:] = flo[:,1,:,:]*H/Hf
+        #print(flo.shape)
+        #print('W/Wf='+str(W/Wf)+', H/Hf='+str(H/Hf))
         # mesh grid 
         xx = torch.arange(0, W).view(1,-1).repeat(H,1)
         yy = torch.arange(0, H).view(-1,1).repeat(1,W)
@@ -76,17 +84,15 @@ def warp(x, flo):
 
 def sequence_loss(image1, image2, flow_preds, gamma=0.8, max_flow=MAX_FLOW):
     """ Loss function defined over sequence of flow predictions """
-
     n_predictions = len(flow_preds)    
     flow_loss = 0.0
-
     for i in range(n_predictions):
         i_weight = gamma**(n_predictions - i - 1)
         warpimg = warp(image2,flow_preds[i])
         i_loss = (warpimg - image1).abs()
         flow_loss += i_weight * i_loss.mean()
-    
-    return flow_loss
+        #print('i_weight='+str(i_weight)+', i_loss.mean()='+str(i_loss.mean()))
+    return flow_loss/n_predictions
 
 
 def count_parameters(model):
@@ -96,10 +102,8 @@ def count_parameters(model):
 def fetch_optimizer(args, model):
     """ Create the optimizer and learning rate scheduler """
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wdecay, eps=args.epsilon)
-
     scheduler = optim.lr_scheduler.OneCycleLR(optimizer, args.lr, args.num_steps+100,
         pct_start=0.05, cycle_momentum=False, anneal_strategy='linear')
-
     return optimizer, scheduler
     
 
@@ -155,8 +159,8 @@ def train(args):
     model = nn.DataParallel(RAFT(args), device_ids=args.gpus)
     print("Parameter Count: %d" % count_parameters(model))
 
-    if args.restore_ckpt is not None:
-        model.load_state_dict(torch.load(args.restore_ckpt), strict=False)
+    #if args.restore_ckpt is not None:
+    #    model.load_state_dict(torch.load(args.restore_ckpt), strict=False)
 
     model.cuda()
     model.train()
@@ -171,7 +175,6 @@ def train(args):
     scaler = GradScaler(enabled=args.mixed_precision)
     logger = Logger(model, scheduler)
 
-    VAL_FREQ = 5000
     add_noise = True
 
     should_keep_training = True
@@ -179,16 +182,18 @@ def train(args):
 
         for i_batch, data_blob in enumerate(train_loader):
             optimizer.zero_grad()
-            image1, image2 = [x.cuda() for x in data_blob]
+            image1, image2, img1_orig, img2_orig = [x.cuda() for x in data_blob]
 
             if args.add_noise:
                 stdv = np.random.uniform(0.0, 5.0)
                 image1 = (image1 + stdv * torch.randn(*image1.shape).cuda()).clamp(0.0, 255.0)
                 image2 = (image2 + stdv * torch.randn(*image2.shape).cuda()).clamp(0.0, 255.0)
+            print(image1.shape)
+            print(img1_orig.shape)
 
             flow_predictions = model(image1, image2, iters=args.iters)            
 
-            loss = sequence_loss(image1, image2, flow_predictions, args.gamma)
+            loss = sequence_loss(img1_orig, img2_orig, flow_predictions, args.gamma)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)                
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -242,6 +247,7 @@ if __name__ == '__main__':
     parser.add_argument('--restore_ckpt', help="restore checkpoint")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--validation', type=str, nargs='+')
+    parser.add_argument('--data_dir', default='/work/eexna/Creative/results/ESPRITlandscape', help="dataset for evaluation")
 
     parser.add_argument('--lr', type=float, default=0.00002)
     parser.add_argument('--num_steps', type=int, default=100000)
@@ -257,6 +263,9 @@ if __name__ == '__main__':
     parser.add_argument('--dropout', type=float, default=0.0)
     parser.add_argument('--gamma', type=float, default=0.8, help='exponential weighting')
     parser.add_argument('--add_noise', action='store_true')
+    parser.add_argument('--flip', action='store_true')
+    parser.add_argument('--minscale', type=float, default=-0.2)
+    parser.add_argument('--maxscale', type=float, default=0.6)
     args = parser.parse_args()
 
     torch.manual_seed(1234)
