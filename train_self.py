@@ -86,7 +86,7 @@ def sequence_loss(image1, image2, flow_preds, gamma=0.8, max_flow=MAX_FLOW):
         i_loss = (warpimg - image1).abs()
         flow_loss += i_weight * i_loss.mean()
     
-    return flow_loss
+    return flow_loss/n_predictions
 
 
 def count_parameters(model):
@@ -242,6 +242,7 @@ if __name__ == '__main__':
     parser.add_argument('--restore_ckpt', help="restore checkpoint")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--validation', type=str, nargs='+')
+    parser.add_argument('--data_dir', default='/work/eexna/Creative/results/ESPRITlandscape', help="dataset for evaluation")
 
     parser.add_argument('--lr', type=float, default=0.00002)
     parser.add_argument('--num_steps', type=int, default=100000)

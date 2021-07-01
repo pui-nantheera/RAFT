@@ -210,7 +210,8 @@ def fetch_dataloader(args, TRAIN_DS='C+T+K+S+H'):
 
     elif args.stage == 'ESPRIT':
         aug_params = {'crop_size': args.image_size, 'min_scale': -0.6, 'max_scale': 0.6, 'do_flip': False}
-        train_dataset = ESPRIT(aug_params)
+        train_dataset = ESPRIT(aug_params, root=args.data_dir)
+
 
     elif args.stage == 'sintel':
         aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True}
