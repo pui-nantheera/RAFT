@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', default='/work/eexna/Creative/results/ESPRITlandscape_2f_RAFT/10501_raft-ESPRIT.pth', help="restore checkpoint")
+parser.add_argument('--model', default='/home/eexna/Creative/pytorch_RAFT_flow/models/raft-sintel.pth', help="restore checkpoint")
 parser.add_argument('--path', default='/work/eexna/Creative/results/ESPRITlandscape', help="dataset for evaluation")
 parser.add_argument('--result', default='/work/eexna/Creative/results/ESPRITlandscape_RAFT', help="save result")
 parser.add_argument('--small', action='store_true', help='use small model')
@@ -99,15 +99,20 @@ with torch.no_grad():
                 flow_up[:,1,:,:] = flow_up[:,1,:,:]*H/Hf
                 warpimg1 = warp(img_orig2,flow_up)
                 #wrapimg2 = warp(image1,flow_up)
-                image1 = padder.unpad(img_orig1[0]).permute(1, 2, 0).cpu().numpy()
+                image1 = padder.unpad(img_orig1[0]).permute(1, 2, 0).cpu()
                 #image2 = padder.unpad(image2[0]).permute(1, 2, 0).cpu().numpy()
-                warpimg1 = padder.unpad(warpimg1[0]).permute(1, 2, 0).cpu().numpy()
+                warpimg1 = padder.unpad(warpimg1[0]).permute(1, 2, 0).cpu()
+                i_loss = (image1 - warpimg1).abs()
+                image1 = image1.numpy()
+                warpimg1 = warpimg1.numpy()
                 #wrapimg2 = padder.unpad(wrapimg2[0]).permute(1, 2, 0).cpu().numpy()
                 # save result
                 subname = imfile1.split("/")
                 savename = os.path.join(args.result, str(scaling)  + '_' +  subname[-1])
                 diffimg = np.abs(image1 - warpimg1)
+                
                 print(str(scaling) + ': ' + str(np.mean(diffimg[200:4100, 200:7480,:])))
+                print(str(scaling) + ': ' + str(i_loss.mean())
                 img_flo = 0.5*(image1 + warpimg1)
                 #flow = padder.unpad(flow_up[0]).permute(1, 2, 0).cpu().numpy()
                 #img_flo = flow_viz.flow_to_image(flow)
