@@ -121,7 +121,7 @@ class Logger:
         metrics_str = ("{:10.4f}, "*len(metrics_data)).format(*metrics_data)
         
         # print the training status
-        print(training_str + metrics_str)
+        #print(training_str + metrics_str)
 
         if self.writer is None:
             self.writer = SummaryWriter()
@@ -157,7 +157,7 @@ class Logger:
 def train(args):
 
     model = nn.DataParallel(RAFT(args), device_ids=args.gpus)
-    print("Parameter Count: %d" % count_parameters(model))
+    #print("Parameter Count: %d" % count_parameters(model))
 
     #if args.restore_ckpt is not None:
     #    model.load_state_dict(torch.load(args.restore_ckpt), strict=False)
@@ -188,11 +188,11 @@ def train(args):
                 stdv = np.random.uniform(0.0, 5.0)
                 image1 = (image1 + stdv * torch.randn(*image1.shape).cuda()).clamp(0.0, 255.0)
                 image2 = (image2 + stdv * torch.randn(*image2.shape).cuda()).clamp(0.0, 255.0)
-            print(image1.shape)
-            print(img1_orig.shape)
+            #print(image1.shape)
+            #print(img1_orig.shape)
 
             flow_predictions = model(image1, image2, iters=args.iters)            
-
+            #print('flow_predictions')
             loss = sequence_loss(img1_orig, img2_orig, flow_predictions, args.gamma)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)                
@@ -202,8 +202,12 @@ def train(args):
             scheduler.step()
             scaler.update()
 
+            flow_low, flow_up = model(image1, image2, iters=args.iters_test, test_mode=True)
+            warpimg1 = warp(img2_orig,flow_up)
+            i_loss = (img1_orig - warpimg1).abs().mean()
+
             #logger.push(metrics)
-            print('processing step '+ str(total_steps) + ', loss ' + str(loss.item()))
+            print('processing step '+ str(total_steps) + ', i_loss ' + str(i_loss.item()))
             if total_steps % VAL_FREQ == 0:
                 print('i=' + str(total_steps) + ' loss=' + str(loss))
                 PATH = args.save_ckpt + '/%d_%s.pth' % (total_steps+1, args.name)
@@ -257,6 +261,7 @@ if __name__ == '__main__':
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
 
     parser.add_argument('--iters', type=int, default=12)
+    parser.add_argument('--iters_test', type=int, default=20)
     parser.add_argument('--wdecay', type=float, default=.00005)
     parser.add_argument('--epsilon', type=float, default=1e-8)
     parser.add_argument('--clip', type=float, default=1.0)
