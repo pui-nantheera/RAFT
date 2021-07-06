@@ -8,6 +8,10 @@ from extractor import BasicEncoder, SmallEncoder
 from corr import CorrBlock, AlternateCorrBlock
 from utils.utils import bilinear_sampler, coords_grid, upflow8
 
+import functools
+from torch.nn import Parameter
+from torch.nn.utils import parameters_to_vector
+
 try:
     autocast = torch.cuda.amp.autocast
 except:

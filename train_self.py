@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 from torch.utils.data import DataLoader
-from raft import RAFT
+from raft import RAFT, ResnetGenerator
 import evaluate
 import datasets_self
 
@@ -43,6 +43,20 @@ except:
 MAX_FLOW = 400
 SUM_FREQ = 100
 VAL_FREQ = 500
+dtype = torch.cuda.FloatTensor
+lossL2 = torch.nn.MSELoss().type(dtype)
+
+def upflow(x, flo):
+        B, C, H, W = x.size()
+        Bf,Cf,Hf,Wf = flo.shape
+        #print('flo.shape='+str(Hf)+','+str(Wf))
+        #print('x.shape='+str(H)+','+str(W))
+        flo  = F.interpolate(flo,(H,W),mode='bicubic', align_corners=True)
+        flo[:,0,:,:] = flo[:,0,:,:]*W/Wf
+        flo[:,1,:,:] = flo[:,1,:,:]*H/Hf
+        #print(flo.shape)
+        #print('W/Wf='+str(W/Wf)+', H/Hf='+str(H/Hf))
+        return flo
 
 def warp(x, flo):
         """
@@ -51,14 +65,6 @@ def warp(x, flo):
         flo: [B, 2, H, W] flow
         """
         B, C, H, W = x.size()
-        Bf,Cf,Hf,Wf = flo.shape
-        #print('flo.shape='+str(Hf)+','+str(Wf))
-        #print('x.shape='+str(H)+','+str(W))
-        flo  = F.interpolate(flo,(H,W),mode='bicubic')
-        flo[:,0,:,:] = flo[:,0,:,:]*W/Wf
-        flo[:,1,:,:] = flo[:,1,:,:]*H/Hf
-        #print(flo.shape)
-        #print('W/Wf='+str(W/Wf)+', H/Hf='+str(H/Hf))
         # mesh grid 
         xx = torch.arange(0, W).view(1,-1).repeat(H,1)
         yy = torch.arange(0, H).view(-1,1).repeat(1,W)
@@ -157,6 +163,7 @@ class Logger:
 def train(args):
 
     model = nn.DataParallel(RAFT(args), device_ids=args.gpus)
+    modelup = ResnetGenerator(5, 2, ngf=8, n_blocks=2)
     #print("Parameter Count: %d" % count_parameters(model))
 
     #if args.restore_ckpt is not None:
@@ -164,12 +171,15 @@ def train(args):
 
     model.cuda()
     model.train()
+    modelup.cuda()
+    modelup.train()
 
     if args.stage != 'chairs':
         model.module.freeze_bn()
 
     train_loader = datasets_self.fetch_dataloader(args)
     optimizer, scheduler = fetch_optimizer(args, model)
+    optimizerup, schedulerup = fetch_optimizer(args, modelup)
 
     total_steps = 0
     scaler = GradScaler(enabled=args.mixed_precision)
@@ -182,6 +192,7 @@ def train(args):
 
         for i_batch, data_blob in enumerate(train_loader):
             optimizer.zero_grad()
+            optimizerup.zero_grad()
             image1, image2, img1_orig, img2_orig = [x.cuda() for x in data_blob]
 
             if args.add_noise:
@@ -191,23 +202,34 @@ def train(args):
             #print(image1.shape)
             #print(img1_orig.shape)
 
-            flow_predictions = model(image1, image2, iters=args.iters)            
+            flow_predictions = model(image1, image2, iters=args.iters)  
+            flow_up = upflow(img2_orig,flow_predictions[-1])
+            flow_final = modelup(torch.cat((flow_up, img1_orig), dim=1))
+            warpimg1 = warp(img2_orig,flow_final)
+
             #print('flow_predictions')
-            loss = sequence_loss(img1_orig, img2_orig, flow_predictions, args.gamma)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)                
+            loss = sequence_loss(image1, image2, flow_predictions, args.gamma)
+            lossup = lossL2(img1_orig,warpimg1)
+            total_loss = loss + args.weight*lossup
+            scaler.scale(total_loss).backward()
+            scaler.unscale_(optimizer)  
+            #scaler.unscale_(optimizerup)                
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            #torch.nn.utils.clip_grad_norm_(modelup.parameters(), args.clip)
             
             scaler.step(optimizer)
+            scaler.step(optimizerup)
             scheduler.step()
+            schedulerup.step()
             scaler.update()
 
             flow_low, flow_up = model(image1, image2, iters=args.iters_test, test_mode=True)
+            flow_up = upflow(img2_orig,flow_up)
             warpimg1 = warp(img2_orig,flow_up)
             i_loss = (img1_orig - warpimg1).abs().mean()
 
             #logger.push(metrics)
-            print('processing step '+ str(total_steps) + ', i_loss ' + str(i_loss.item()))
+            print('processing step '+ str(total_steps) + ', i_loss ' + str(loss.item()) + ', ' + str(args.weight*lossup.item()) + ', ' + str(i_loss.item()))
             if total_steps % VAL_FREQ == 0:
                 print('i=' + str(total_steps) + ' loss=' + str(loss))
                 PATH = args.save_ckpt + '/%d_%s.pth' % (total_steps+1, args.name)
@@ -262,6 +284,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--iters', type=int, default=12)
     parser.add_argument('--iters_test', type=int, default=20)
+    parser.add_argument('--weight', type=float, default=0.01)
     parser.add_argument('--wdecay', type=float, default=.00005)
     parser.add_argument('--epsilon', type=float, default=1e-8)
     parser.add_argument('--clip', type=float, default=1.0)
@@ -280,3 +303,5 @@ if __name__ == '__main__':
         os.mkdir('checkpoints')
 
     train(args)
+
+
