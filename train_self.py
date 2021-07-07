@@ -45,6 +45,7 @@ SUM_FREQ = 100
 VAL_FREQ = 500
 dtype = torch.cuda.FloatTensor
 lossL2 = torch.nn.MSELoss().type(dtype)
+lossL1 = torch.nn.L1Loss().type(dtype)
 
 def upflow(x, flo):
         B, C, H, W = x.size()
@@ -162,24 +163,22 @@ class Logger:
 
 def train(args):
 
-    model = nn.DataParallel(RAFT(args), device_ids=args.gpus)
-    modelup = ResnetGenerator(5, 2, ngf=8, n_blocks=2)
+    modelRAFT = nn.DataParallel(RAFT(args), device_ids=args.gpus)    #model = RAFT(args)
+    modelResNet = nn.DataParallel(ResnetGenerator(5, 2, ngf=8, n_blocks=2), device_ids=args.gpus)
     #print("Parameter Count: %d" % count_parameters(model))
 
     #if args.restore_ckpt is not None:
     #    model.load_state_dict(torch.load(args.restore_ckpt), strict=False)
+    model = RAFTConcatResNet(modelRAFT, modelResNet)
 
     model.cuda()
     model.train()
-    modelup.cuda()
-    modelup.train()
 
     if args.stage != 'chairs':
         model.module.freeze_bn()
 
     train_loader = datasets_self.fetch_dataloader(args)
     optimizer, scheduler = fetch_optimizer(args, model)
-    optimizerup, schedulerup = fetch_optimizer(args, modelup)
 
     total_steps = 0
     scaler = GradScaler(enabled=args.mixed_precision)
@@ -202,34 +201,21 @@ def train(args):
             #print(image1.shape)
             #print(img1_orig.shape)
 
-            flow_predictions = model(image1, image2, iters=args.iters)  
-            flow_up = upflow(img2_orig,flow_predictions[-1])
-            flow_final = modelup(torch.cat((flow_up, img1_orig), dim=1))
-            warpimg1 = warp(img2_orig,flow_final)
+            # forward process
+            warpimg1 = model(image1, image2, img1_orig, img2_orig, iters=args.iters)  
 
-            #print('flow_predictions')
-            loss = sequence_loss(image1, image2, flow_predictions, args.gamma)
-            lossup = lossL2(img1_orig,warpimg1)
-            total_loss = loss + args.weight*lossup
-            scaler.scale(total_loss).backward()
-            scaler.unscale_(optimizer)  
-            #scaler.unscale_(optimizerup)                
+            # backward process
+            loss = lossL1(img1_orig,warpimg1)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)               
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-            #torch.nn.utils.clip_grad_norm_(modelup.parameters(), args.clip)
             
             scaler.step(optimizer)
-            scaler.step(optimizerup)
             scheduler.step()
-            schedulerup.step()
             scaler.update()
 
-            flow_low, flow_up = model(image1, image2, iters=args.iters_test, test_mode=True)
-            flow_up = upflow(img2_orig,flow_up)
-            warpimg1 = warp(img2_orig,flow_up)
-            i_loss = (img1_orig - warpimg1).abs().mean()
-
             #logger.push(metrics)
-            print('processing step '+ str(total_steps) + ', i_loss ' + str(loss.item()) + ', ' + str(args.weight*lossup.item()) + ', ' + str(i_loss.item()))
+            print('processing step '+ str(total_steps) + ', i_loss ' + str(loss.item()) )
             if total_steps % VAL_FREQ == 0:
                 print('i=' + str(total_steps) + ' loss=' + str(loss))
                 PATH = args.save_ckpt + '/%d_%s.pth' % (total_steps+1, args.name)

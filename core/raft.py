@@ -106,10 +106,10 @@ class RAFT(nn.Module):
         fmap1 = fmap1.float()
         fmap2 = fmap2.float()
         if self.args.alternate_corr:
-            print('Using AlternateCorrBlock')
+            #print('Using AlternateCorrBlock')
             corr_fn = AlternateCorrBlock(fmap1, fmap2, radius=self.args.corr_radius)
         else:
-            print('Using CorrBlock')
+            #print('Using CorrBlock')
             corr_fn = CorrBlock(fmap1, fmap2, radius=self.args.corr_radius)
 
         # run the context network
@@ -287,3 +287,62 @@ class ResnetBlock(nn.Module):
         """Forward function (with skip connections)"""
         out = x + self.conv_block(x)  # add skip connections
         return out
+
+##############################################################################################
+class RAFTConcatResNet(nn.Module):
+    def __init__(self, modelA, modelB):
+        super(RAFTConcatResNet, self).__init__()
+        self.modelA = modelA
+        self.modelB = modelB
+    
+    def upflow(x, flo):
+        B, C, H, W = x.size()
+        Bf,Cf,Hf,Wf = flo.shape
+        #print('flo.shape='+str(Hf)+','+str(Wf))
+        #print('x.shape='+str(H)+','+str(W))
+        flo  = F.interpolate(flo,(H,W),mode='bicubic', align_corners=True)
+        flo[:,0,:,:] = flo[:,0,:,:]*W/Wf
+        flo[:,1,:,:] = flo[:,1,:,:]*H/Hf
+        #print(flo.shape)
+        #print('W/Wf='+str(W/Wf)+', H/Hf='+str(H/Hf))
+        return flo
+
+    def warp(x, flo):
+        """
+        warp an image/tensor (im2) back to im1, according to the optical flow
+        x: [B, C, H, W] (im2)
+        flo: [B, 2, H, W] flow
+        """
+        B, C, H, W = x.size()
+        # mesh grid 
+        xx = torch.arange(0, W).view(1,-1).repeat(H,1)
+        yy = torch.arange(0, H).view(-1,1).repeat(1,W)
+        xx = xx.view(1,1,H,W).repeat(B,1,1,1)
+        yy = yy.view(1,1,H,W).repeat(B,1,1,1)
+        grid = torch.cat((xx,yy),1).float()
+        if x.is_cuda:
+            grid = grid.cuda()
+        vgrid = Variable(grid) + flo
+        # scale grid to [-1,1] 
+        vgrid[:,0,:,:] = 2.0*vgrid[:,0,:,:].clone() / max(W-1,1)-1.0
+        vgrid[:,1,:,:] = 2.0*vgrid[:,1,:,:].clone() / max(H-1,1)-1.0
+        vgrid = vgrid.permute(0,2,3,1)        
+        output = nn.functional.grid_sample(x, vgrid)
+        mask = torch.autograd.Variable(torch.ones(x.size()))#.cuda()
+        if x.is_cuda:
+            mask = mask.cuda()
+        mask = nn.functional.grid_sample(mask, vgrid)
+        mask[mask<0.9999] = 0
+        mask[mask>0] = 1
+        return output*mask
+
+    def forward(self, image1, image2, img1_orig, img2_orig, iters=12):
+        flow_predictions = self.modelA(image1, image2, iters=iters)
+        flow_up = self.upflow(img2_orig,flow_predictions[-1]) 
+        flow_final = self.modelup(torch.cat((flow_up, img1_orig), dim=1))
+        x = self.warp(img2_orig,flow_final)
+        return x
+
+##############################################################################################
+
+
