@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 from torch.utils.data import DataLoader
-from raft import RAFT, ResnetGenerator
+from raft import RAFT, ResnetGenerator, RAFTConcatResNet
 import evaluate
 import datasets_self
 
@@ -164,18 +164,19 @@ class Logger:
 def train(args):
 
     modelRAFT = nn.DataParallel(RAFT(args), device_ids=args.gpus)    #model = RAFT(args)
-    modelResNet = nn.DataParallel(ResnetGenerator(5, 2, ngf=8, n_blocks=2), device_ids=args.gpus)
+    modelResNet = nn.DataParallel(ResnetGenerator(5, 2, ngf=8, n_blocks=6, downfactor=1), device_ids=args.gpus)
     #print("Parameter Count: %d" % count_parameters(model))
 
     #if args.restore_ckpt is not None:
     #    model.load_state_dict(torch.load(args.restore_ckpt), strict=False)
+
+    if args.stage != 'chairs':
+        modelRAFT.module.freeze_bn()
     model = RAFTConcatResNet(modelRAFT, modelResNet)
 
     model.cuda()
     model.train()
 
-    if args.stage != 'chairs':
-        model.module.freeze_bn()
 
     train_loader = datasets_self.fetch_dataloader(args)
     optimizer, scheduler = fetch_optimizer(args, model)
@@ -191,7 +192,6 @@ def train(args):
 
         for i_batch, data_blob in enumerate(train_loader):
             optimizer.zero_grad()
-            optimizerup.zero_grad()
             image1, image2, img1_orig, img2_orig = [x.cuda() for x in data_blob]
 
             if args.add_noise:
@@ -235,8 +235,8 @@ def train(args):
                 #logger.write_dict(results)
                 
                 model.train()
-                if args.stage != 'chairs':
-                    model.module.freeze_bn()
+                #if args.stage != 'chairs':
+                #    model.module.freeze_bn()
             
             total_steps += 1
 

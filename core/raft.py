@@ -11,6 +11,7 @@ from utils.utils import bilinear_sampler, coords_grid, upflow8
 import functools
 from torch.nn import Parameter
 from torch.nn.utils import parameters_to_vector
+from torch.autograd import Variable
 
 try:
     autocast = torch.cuda.amp.autocast
@@ -157,7 +158,7 @@ class ResnetGenerator(nn.Module):
     We adapt Torch code and idea from Justin Johnson's neural style transfer project(https://github.com/jcjohnson/fast-neural-style)
     """
 
-    def __init__(self, input_nc, output_nc, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6, activate_type='reLU', padding_type='reflect'):
+    def __init__(self, input_nc, output_nc, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False, n_blocks=6, activate_type='reLU', padding_type='reflect', downfactor=2):
         """Construct a Resnet-based generator
 
         Parameters:
@@ -197,7 +198,7 @@ class ResnetGenerator(nn.Module):
                  norm_layer(ngf),
                  activateLayer] 
 
-        n_downsampling = 2
+        n_downsampling = downfactor
         for i in range(n_downsampling):  # add downsampling layers
             mult = 2 ** i
             model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1, bias=use_bias),
@@ -295,7 +296,7 @@ class RAFTConcatResNet(nn.Module):
         self.modelA = modelA
         self.modelB = modelB
     
-    def upflow(x, flo):
+    def upflow(self, x, flo):
         B, C, H, W = x.size()
         Bf,Cf,Hf,Wf = flo.shape
         #print('flo.shape='+str(Hf)+','+str(Wf))
@@ -307,7 +308,7 @@ class RAFTConcatResNet(nn.Module):
         #print('W/Wf='+str(W/Wf)+', H/Hf='+str(H/Hf))
         return flo
 
-    def warp(x, flo):
+    def warp(self, x, flo):
         """
         warp an image/tensor (im2) back to im1, according to the optical flow
         x: [B, C, H, W] (im2)
@@ -339,10 +340,8 @@ class RAFTConcatResNet(nn.Module):
     def forward(self, image1, image2, img1_orig, img2_orig, iters=12):
         flow_predictions = self.modelA(image1, image2, iters=iters)
         flow_up = self.upflow(img2_orig,flow_predictions[-1]) 
-        flow_final = self.modelup(torch.cat((flow_up, img1_orig), dim=1))
+        flow_final = self.modelB(torch.cat((flow_up, img1_orig), dim=1))
         x = self.warp(img2_orig,flow_final)
         return x
 
 ##############################################################################################
-
-
