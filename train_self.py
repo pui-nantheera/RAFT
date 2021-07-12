@@ -163,7 +163,7 @@ class Logger:
 def train(args):
 
     model = nn.DataParallel(RAFT(args), device_ids=args.gpus)
-    modelup = ResnetGenerator(5, 2, ngf=8, n_blocks=2)
+    modelup = ResnetGenerator(5, 2, ngf=8, n_blocks=6, downfactor=1)
     #print("Parameter Count: %d" % count_parameters(model))
 
     #if args.restore_ckpt is not None:
@@ -274,6 +274,7 @@ if __name__ == '__main__':
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--validation', type=str, nargs='+')
     parser.add_argument('--data_dir', default='/work/eexna/Creative/results/ESPRITlandscape', help="dataset for evaluation")
+    parser.add_argument('--sizeratio', type=int, default=2)
 
     parser.add_argument('--lr', type=float, default=0.00002)
     parser.add_argument('--num_steps', type=int, default=100000)
@@ -303,5 +304,6 @@ if __name__ == '__main__':
         os.mkdir('checkpoints')
 
     train(args)
+
 
 
