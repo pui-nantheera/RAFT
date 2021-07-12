@@ -16,7 +16,7 @@ from utils.augmentor_self import FlowAugmentor #, SparseFlowAugmentor
 
 
 class FlowDataset(data.Dataset):
-    def __init__(self, aug_params=None, sparse=False):
+    def __init__(self, aug_params=None, sparse=False, sizeratio=2):
         self.augmentor = None
         self.sparse = sparse
         if aug_params is not None:
@@ -29,6 +29,7 @@ class FlowDataset(data.Dataset):
         self.init_seed = False
         self.image_list = []
         self.extra_info = []
+        self.sizeratio = sizeratio
 
     def __getitem__(self, index):
 
@@ -70,8 +71,8 @@ class FlowDataset(data.Dataset):
         img1 = img1.resize((width, height))
         img2 = img2.resize((width, height))
         #(width, height) = (img1_orig.width // 2, img1_orig.height // 2)
-        width = 960 #1920
-        height = 528#1056
+        width = width*self.sizeratio   #1920
+        height = height*self.sizeratio #1056
         img1_orig = img1_orig.resize((width, height))
         img2_orig = img2_orig.resize((width, height))
         img1_orig = np.array(img1_orig).astype(np.uint8)
@@ -208,8 +209,8 @@ class HD1K(FlowDataset):
             seq_ix += 1
 
 class ESPRIT(FlowDataset):
-    def __init__(self, aug_params=None, root='/work/eexna/Creative/results/ESPRITlandscape'):
-        super(ESPRIT, self).__init__(aug_params, sparse=False)
+    def __init__(self, aug_params=None, root='/work/eexna/Creative/results/ESPRITlandscape_2f', sizeratio=2):
+        super(ESPRIT, self).__init__(aug_params, sparse=False, sizeratio=sizeratio)
         images = sorted(glob(root + '/*.png'))
         for i in range(len(images)-1):
             self.image_list += [ [images[i], images[i+1]] ]
@@ -230,7 +231,7 @@ def fetch_dataloader(args, TRAIN_DS='C+T+K+S+H'):
 
     elif args.stage == 'ESPRIT':
         aug_params = {'crop_size': args.image_size, 'min_scale': args.minscale, 'max_scale': args.maxscale, 'do_flip': args.flip}
-        train_dataset = ESPRIT(aug_params, root=args.data_dir)
+        train_dataset = ESPRIT(aug_params, root=args.data_dir, sizeratio=args.sizeratio)
 
     elif args.stage == 'sintel':
         aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True}
@@ -255,4 +256,5 @@ def fetch_dataloader(args, TRAIN_DS='C+T+K+S+H'):
 
     print('Training with %d image pairs' % len(train_dataset))
     return train_loader
+
 
